@@ -1,0 +1,237 @@
+---
+title: "PROJ"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+library(dplyr)
+library(tidyverse)
+library(ggplot2)
+library(viridis)
+library(hrbrthemes)
+library(GGally)
+library(ISLR)
+all_seasons <- read.csv("all_seasons.csv")
+all_seasons <- all_seasons[-1]
+all_seasons <- all_seasons[, -c(2:5)]
+all_seasons <- all_seasons[, -c(2:3)]
+all_seasons <- all_seasons[-5]
+all_seasons <- all_seasons[, -c(8:14)]
+all_seasons <- all_seasons %>% filter(draft_year != "Undrafted", draft_round != "Undrafted", draft_number != "Undrafted")
+
+# convert characters into numeric vectors
+draft.yr.num <- as.numeric(all_seasons$draft_year)
+draft.round.num <- as.numeric(all_seasons$draft_round)
+draft.pick.num <- as.numeric(all_seasons$draft_number)
+
+update.frame <- data.frame(player_name = all_seasons$player_name, draft_year = draft.yr.num, draft_round = draft.round.num, draft_pick = draft.pick.num, pts = all_seasons$pts, reb = all_seasons$reb, ast = all_seasons$ast) # this allows us to aggregate everything because they are now all numeric
+
+final.frame <- update.frame %>% group_by(player_name) %>% summarise(draft_year = mean(draft_year), draft_round = mean(draft_round), draft_pick = mean(draft_pick), pts = mean(pts), reb =  mean(reb), ast = mean(ast))
+
+final.frame[final.frame$player_name == "Jason Williams",]
+
+mean(final.frame$draft_year)
+mean(final.frame$draft_round)
+mean(final.frame$draft_pick)
+mean(final.frame$pts)
+mean(final.frame$reb)
+mean(final.frame$ast)
+
+sd(final.frame$pts)
+sd(final.frame$reb)
+sd(final.frame$ast)
+
+#descriptive stats
+head(sort(table(final.frame$draft_year), decreasing = TRUE), 3) # most players in draft year
+head(sort(table(final.frame$draft_year), increasing = TRUE), 3) # least per draft year
+head(sort(table(final.frame$draft_round), decreasing = TRUE), 1) # max round pick
+head(sort(table(final.frame$draft_pick), decreasing = TRUE), 10) # draft pick counts
+
+head(sort(unlist(split(final.frame$pts, final.frame$player_name)), decreasing = TRUE), 5)  # top 5 points
+(26.93333 + 26.88462 + 26.06429 + 25.90000 + 25.30000) / 5
+
+head(sort(unlist(split(final.frame$reb, final.frame$player_name)), decreasing = TRUE), 5) #top5 rebounds
+(14.15000 + 13.52222 + 13.03333 + 12.00000 + 11.85882) / 5 
+
+head(sort(unlist(split(final.frame$ast, final.frame$player_name)), decreasing = TRUE), 5) #top 5 assist
+(9.400000+8.933333+8.880000+8.682353+8.528571) / 5
+
+# Now to try and create the accolades columns
+Player.Award.Shares <- read.csv("Player Award Shares.csv")
+award.frame <- Player.Award.Shares %>% filter(winner == "TRUE") %>% filter(season >= 1996)
+award.frame$winner = 1
+
+dpoys <- award.frame %>% filter(award == "dpoy") %>% dplyr::select(player, winner)
+dpoy.num <- dpoys %>% group_by(player) %>% summarise(winner = sum(winner))
+
+mips <- award.frame %>% filter(award == "mip") %>% dplyr::select(player, winner)
+mip.num <- mips %>% group_by(player) %>% summarise(winner = sum(winner))
+
+mvps <- award.frame %>% filter(award == "nba mvp") %>% dplyr::select(player, winner)
+mvp.num <- mvps %>% group_by(player) %>% summarise(winner = sum(winner))
+
+roty <- award.frame %>% filter(award == "nba roy") %>% dplyr::select(player, winner)
+roty.num <- roty %>% group_by(player) %>% summarise(winner = sum(winner))
+
+sixth.man <- award.frame %>% filter(award == "smoy") %>% dplyr::select(player, winner)
+sixth.man.num <- sixth.man %>% group_by(player) %>% summarise(winner = sum(winner))
+
+accolades.finder <- function(x){
+  dpoy.wins  <- merge(x, dpoy.num, all.x = TRUE, by.x = "player_name", by.y = "player")
+  dpoy.wins <- dpoy.wins %>% replace(is.na(.), 0)
+  mip.wins <- merge(dpoy.wins, mip.num, all.x = TRUE, by.x = "player_name", by.y = "player")
+  mip.wins <- mip.wins %>% replace(is.na(.), 0)
+  mvp.wins <- merge(mip.wins, mvp.num, all.x = TRUE, by.x = "player_name", by.y = "player")
+  mvp.wins <- mvp.wins %>% replace(is.na(.), 0)
+  roty.wins <- merge(mvp.wins, roty.num, all.x = TRUE, by.x = "player_name", by.y = "player")
+  roty.wins <- roty.wins %>% replace(is.na(.), 0)
+  sixth.man.wins <- merge(roty.wins, sixth.man.num, all.x = TRUE, by.x = "player_name", by.y = "player")
+  sixth.man.wins <- sixth.man.wins %>% replace(is.na(.), 0)
+}
+new.frame <- accolades.finder(final.frame)
+colnames(new.frame)[8] <- "dpoys"
+colnames(new.frame)[9] <- "mips"
+final.frame2 <- new.frame %>% dplyr::rename(mvps = winner.x, rotys = winner.y, sixth.mans = winner)
+final.frame2 <- mutate(final.frame2, career.score = pts + (reb*1.2) + (ast*1.5) + (dpoys*15) + (mips*10) + (mvps*20) + (rotys * 10) + (sixth.mans * 5))
+
+final.frame2$draft_round[final.frame2$draft_pick>30] <- 2
+final.frame2 <- final.frame2 %>% filter(draft_round == 1 | draft_round == 2)
+
+head(sort(unlist(split(final.frame2$career.score, final.frame2$player_name)), decreasing = TRUE), 10)
+test <- lm(career.score~draft_round + draft_pick + draft_year, data = final.frame2)
+anova(test)
+summary(test)
+plot(test)
+
+test.2 <- lm(career.score~draft_round + draft_pick, data = final.frame2)
+summary(test.2)
+
+test.3 <- lm(career.score ~ draft_round + draft_pick + as.factor(draft_year), data = final.frame2)
+summary(test.3)
+
+test.4 <- lm(career.score ~ draft_pick, data = final.frame2)
+summary(test.4)
+
+
+plot.frame <- final.frame2
+plot.frame$draft_year = as.character(plot.frame$draft_year)
+plot.frame$draft_pick = as.character(plot.frame$draft_pick)
+plot.frame$draft_round = as.character(plot.frame$draft_round)
+
+final.frame2 %>% #i think we can use this
+    ggplot(aes(x=draft_year, y=pts, fill = (draft_year>=1996))) +
+    geom_violin() +
+    scale_fill_viridis(discrete = TRUE, alpha=0.6, option="A") +
+    theme_classic() +
+    theme_ipsum() + theme(
+        legend.position="none",
+        plot.title = element_text(size=11)) +
+    ggtitle("Violin Plot of Points vs Draft Year") +
+    xlab("Draft Year") + ylab("Points")
+
+# These are for desc stats and are essentially same as three below.
+final.frame2 %>% 
+    ggplot(aes(x=draft_year, y=pts, fill = (draft_year>=1996))) +
+    geom_boxplot() +
+    scale_fill_viridis(discrete = TRUE, alpha=0.6, option="A") +
+    theme_classic() +
+    theme_ipsum() + 
+    theme(legend.position="none",
+    plot.title = element_text(size=11)) +
+    ggtitle("Points vs Separated Draft Year Groups") +
+    xlab("Draft Year") +
+    ylab("Points")
+
+final.frame2 %>% 
+    ggplot(aes(x=draft_year, y=reb, fill = (draft_year>=1996))) +
+    geom_boxplot() +
+    scale_fill_viridis(discrete = TRUE, alpha=.6, option="H") +
+    theme_classic() +
+    theme_ipsum() + 
+    theme(legend.position="none",
+    plot.title = element_text(size=11)) +
+    ggtitle("Rebounds vs Separated Draft Year Groups") +
+    xlab("Draft Year") +
+    ylab("Rebounds")
+
+final.frame2 %>% 
+    ggplot(aes(x=draft_year, y=ast, fill = (draft_year>=1996))) +
+    geom_boxplot() +
+    scale_fill_viridis(discrete = TRUE, alpha=0.6, option="C") +
+    theme_classic() +
+    theme_ipsum() + 
+    theme(legend.position="none",
+    plot.title = element_text(size=11)) +
+    ggtitle("Assists vs Separated Draft Year Groups") +
+    xlab("Draft Year") +
+    ylab("Assists")
+
+boxplot(pts~draft_year,data=final.frame2, main="Distribution of Draft Year Vs Points",
+xlab="Draft Year", ylab="Points", col = "pink", outcol = "skyblue")
+
+boxplot(reb~draft_year,data=final.frame2, main="Distribution of Draft Year Vs Rebounds",
+xlab="Draft Year", ylab="Rebounds", col = "magenta4", outcol = "goldenrod2")
+
+boxplot(ast~draft_year,data=final.frame2, main="Distribution of Draft Year Vs Assists",
+xlab="Draft Year", ylab="Assists", col = "seagreen2", outcol = "deeppink4")
+
+
+boxplot(pts~draft_year,data=final.frame2, main="Draft Year Points",
+xlab="Draft Year", ylab="Points", xlim=c(0,2020)) #xlim doesn't work / test
+
+#ggpairs correlation matrix
+food.for.plot <- final.frame2[,c(2:13)]
+ggpairs(food.for.plot)
+
+regression.class <- mutate(final.frame2, tier = ifelse(draft_pick %in% 1:10, "Tier 1",
+                                     ifelse(draft_pick %in% 11:20, "Tier 2",
+                                     ifelse(draft_pick %in% 21:30, "Tier 3",
+                                     ifelse(draft_pick %in% 31:40, "Tier 4",
+                                     ifelse(draft_pick %in% 41:50, "Tier 5", "Tier 6"))))))
+
+regression.2 <- regression.class %>% filter(draft_pick < 70)
+regression.2 <- regression.2[-c(219),]
+
+ggplot(data = regression.2, mapping = aes(x = draft_pick, y = career.score, color = tier)) +
+    geom_point() +
+    geom_smooth(se = FALSE, method='lm', linetype = "F1") +
+    ggtitle("Career Score by Draft Pick") +
+    xlab("Picks") +
+    ylab("Career Score") +
+    theme_ipsum() + theme(
+    legend.position="right",
+    plot.title = element_text(size=14)
+    ) +
+    scale_colour_discrete(
+    labels = 
+      c("Tier 1" = "1-10",
+        "Tier 2" = "11-20",
+        "Tier 3" = "21-30",
+        "Tier 4" = "31-40",
+        "Tier 5" = "41-50",
+        "Tier 6" = "51 and Beyond")) +
+     labs(color='Tiers') 
+    
+ggplot(data = regression.class, mapping = aes(x = tier, y = career.score)) +
+    geom_boxplot(aes(color = tier)) +
+    ggtitle("Career Score by Tiers") + 
+    xlab("Tiers of Players") + 
+    ylab("Career Score") +
+    theme(legend.position = "left") + 
+    scale_colour_discrete(
+    labels = c("Tier 1" = "1-10",
+               "Tier 2" = "11-20",
+               "Tier 3" = "21-30",
+               "Tier 4" = "31-40",
+               "Tier 5" = "41-50",
+               "Tier 6" = "51 and Beyond")) + labs(color='Tiers (Organized by Picks)') 
+
+train <-  final.frame2[final.frame2$draft_round == 1,]
+test <- final.frame2[final.frame2$draft_round != 1,]
+model <- glm(draft_round~career.score, family = "binomial", data = train)
+predicted <- predict(model, test, type = "response")
+```
